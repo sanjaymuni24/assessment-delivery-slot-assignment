@@ -58,7 +58,15 @@ export class Order {
   // Relations
   @ManyToOne("User", (user: any) => user.orders)
   @JoinColumn({ name: "userId" })
+  // Slot assignment method 
   user!: User;
+  @Column({
+    type: "varchar",
+    length: 20,
+    default: "auto_assigned",
+    comment: "How the delivery slot was chosen: user_selected | auto_assigned | fallback"
+  })
+  slotAssignmentMethod!: "user_selected" | "auto_assigned" | "fallback";
 
   @ManyToOne("DeliverySlot", (deliverySlot: any) => deliverySlot.orders, {
     nullable: true,

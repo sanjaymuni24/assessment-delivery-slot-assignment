@@ -38,12 +38,54 @@ const NOTIFICATION_TEMPLATES: Record<
 };
 
 /**
- * Format a delivery slot into a human-readable string
+ * Format a delivery slot into a human-readable string with assignment method info
  */
-async function formatDeliveryTime(orderId: number): Promise<string> {
+async function formatDeliveryTime(
+  orderId: number,
+  additionalData: Record<string, any> = {}
+): Promise<string> {
   const dataSource = await AppDataSource.initialize();
   const orderRepository = dataSource.getRepository(Order);
 
+  // Check if delivery slot info is provided in additionalData
+  if (additionalData.deliverySlot && additionalData.slotAssignmentMethod) {
+    const slot = additionalData.deliverySlot;
+    const method = additionalData.slotAssignmentMethod;
+
+    const startTime = new Date(slot.startTime);
+    const endTime = new Date(slot.endTime);
+
+    // Format day name
+    const dayNames = [
+      "Sunday", "Monday", "Tuesday", "Wednesday",
+      "Thursday", "Friday", "Saturday"
+    ];
+    const dayName = dayNames[startTime.getDay()];
+
+    // Format time (e.g., "2:00 PM - 5:00 PM")
+    const formatTime = (date: Date) => {
+      let hours = date.getHours();
+      const ampm = hours >= 12 ? "PM" : "AM";
+      hours = hours % 12;
+      hours = hours ? hours : 12; // convert 0 to 12
+      return `${hours}:00 ${ampm}`;
+    };
+
+    const timeSlot = `${dayName} ${formatTime(startTime)} - ${formatTime(endTime)}`;
+
+    // Add method-specific messaging
+    switch (method) {
+      case 'user_selected':
+        return `Your selected delivery time: ${timeSlot}`;
+      case 'fallback':
+        return `Your preferred time slot was unavailable, so we assigned the next available slot: ${timeSlot}`;
+      case 'auto_assigned':
+      default:
+        return `Scheduled for ${timeSlot}`;
+    }
+  }
+
+  // Fallback to database lookup if not provided in additionalData
   const order = await orderRepository.findOne({
     where: { id: orderId },
     relations: ["deliverySlot"],
@@ -88,7 +130,7 @@ async function formatDeliveryTime(orderId: number): Promise<string> {
  * @param orderId Order ID
  * @param type Notification type (order_created, order_confirmed, order_shipped, etc.)
  * @param userId User ID
- * @param additionalData Additional data for the notification message
+ * @param additionalData Additional data for the notification message (including slotAssignmentMethod and deliverySlot)
  */
 export async function notifyUser(
   orderId: number,
@@ -110,8 +152,8 @@ export async function notifyUser(
       throw new Error(`Notification template for type '${type}' not found`);
     }
 
-    // Get delivery information
-    const deliveryInfo = await formatDeliveryTime(orderId);
+    // Get delivery information with slot assignment method context
+    const deliveryInfo = await formatDeliveryTime(orderId, additionalData);
 
     // Prepare data for message interpolation
     const messageData = {
@@ -125,7 +167,10 @@ export async function notifyUser(
 
     // Replace placeholders in the template
     for (const [key, value] of Object.entries(messageData)) {
-      content = content.replace(`{${key}}`, value.toString());
+      // Skip complex objects when replacing placeholders
+      if (typeof value === 'string' || typeof value === 'number') {
+        content = content.replace(`{${key}}`, value.toString());
+      }
     }
 
     // Create notification record
